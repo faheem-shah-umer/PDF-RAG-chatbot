@@ -1,0 +1,13 @@
+streamlit
+python-dotenv
+requests
+langchain
+langchain-community
+langchain-core
+langchain-huggingface
+sentence-transformers
+qdrant-client
+pymupdf4llm
+unstructured
+Pillow
+nltk

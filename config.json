@@ -1,0 +1,12 @@
+{
+    "vector_store": {
+        "path": ""
+    },
+    
+    "data_sources": {
+        "pdf": {
+            "enabled": true,
+            "directory": ""
+        }
+    }
+}
