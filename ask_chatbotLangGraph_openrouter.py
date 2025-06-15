@@ -58,7 +58,7 @@ class ChatBot:
     def setup_workflow(self):
         self.memory = MemorySaver()
         self.thread_id = uuid.uuid4()
-        self.config = {"configurable": {"thread_id": self.thread_id}}
+        self.config["configurable"] = {"thread_id": self.thread_id}
         self.workflow = StateGraph(state_schema=MessagesState)
         self.workflow.add_edge(START, "model")
         self.workflow.add_node("model", self._call_model)
@@ -69,19 +69,19 @@ class ChatBot:
         if self.vstore is None:
             return "No context available (vector DB missing)."
         try:
-            search_method = self.config.get("search_method", {}).get("selected", "Similarity Search")
-            if search_method == "Similarity Search":
+            search_method = self.config.get("search_method", {}).get("selected", "similarity_search")
+            print(f"🔍 Using search method: {search_method}")
+            
+            if search_method == "similarity_search":
                 relevant_chunks = self.vstore.similarity_search_with_score(query, k=5)
-                return relevant_chunks
-            elif search_method == "Max Marginal Relevance":
+            elif search_method == "max_marginal_relevance_search":
                 relevant_chunks = self.vstore.max_marginal_relevance_search(query, k=5)
-                return "".join([chunk.page_content for chunk in relevant_chunks])
             elif search_method == "max_marginal_relevance_search_with_score_by_vector":
-                relevant_chunks = self.vstore.max_marginal_relevance_search_with_score_by_vector(query, k=5)
-                return relevant_chunks
+                query_embedding = self.embeddings.embed_query(query)
+                relevant_chunks = self.vstore.max_marginal_relevance_search_with_score_by_vector(embedding=query_embedding,k=5)
             else:
                 relevant_chunks = self.vstore.similarity_search_with_score(query, k=5)
-                return relevant_chunks
+            return relevant_chunks
         except Exception as e:
             return f"Error retrieving context: {str(e)}"
 
@@ -138,18 +138,54 @@ class ChatBot:
     def ask(self, query, return_score=False):
         context_chunks = self.retrieve_context(query)
 
-        # Handle score-returning structures
-        if isinstance(context_chunks, list) and len(context_chunks) > 0 and isinstance(context_chunks[0], tuple):
-            contexts = [c[0].page_content for c in context_chunks]
-            scores = [c[1] for c in context_chunks]
-        else:
-            if isinstance(context_chunks, str):
-                contexts = context_chunks.split("\n")
-            elif isinstance(context_chunks, list):
-                contexts = [c.page_content if hasattr(c, "page_content") else str(c) for c in context_chunks]
+        # Guard for error string from retrieve_context
+        if isinstance(context_chunks, str) and context_chunks.startswith("Error retrieving context"):
+            print(context_chunks)
+            context_text = context_chunks
+            modified_query = self.construct_query(query, context_text)
+            response = self.generate_response(modified_query, print_model=True)
+            self.conversation_history.append({"question": query, "answer": response})
+            print(f"Q: {query}\nA: {response}\n")
+            return response
+
+        # Improved handling for various context chunk types
+        if isinstance(context_chunks, list) and len(context_chunks) > 0:
+            if isinstance(context_chunks[0], tuple):
+                docs = [c[0] for c in context_chunks]
+                contexts = [doc.page_content for doc in docs]
+                scores = [c[1] for c in context_chunks]
+            elif hasattr(context_chunks[0], "page_content"):
+                docs = context_chunks
+                contexts = [doc.page_content for doc in docs]
+                scores = None
+            elif isinstance(context_chunks[0], str):
+                docs = context_chunks
+                contexts = context_chunks
+                scores = None
             else:
-                contexts = [str(context_chunks)]
+                docs = context_chunks
+                contexts = [str(c) for c in context_chunks]
+                scores = None
+        else:
+            docs = context_chunks
+            contexts = [str(context_chunks)]
             scores = None
+
+        # Extract and display source info
+        sources = []
+        if isinstance(docs, list):
+            for doc in docs:
+                metadata = getattr(doc, "metadata", {})
+                source_info = f"{metadata.get('filename', 'unknown')} (page {metadata.get('page', '?')})"
+                sources.append(source_info)
+        else:
+            metadata = getattr(docs, "metadata", {})
+            source_info = f"{metadata.get('filename', 'unknown')} (page {metadata.get('page', '?')})"
+            sources.append(source_info)
+
+        print("\nSources of retrieved chunks:")
+        for s in sources:
+            print(f" - {s}")
 
         context_text = "\n".join(contexts)
         modified_query = self.construct_query(query, context_text)
@@ -166,7 +202,7 @@ class ChatBot:
         cosine_sim = self.evaluate_metrics(query, response, contexts)
 
         if return_score:
-            return response, avg_score, k, cosine_sim
+            return response, avg_score, k, cosine_sim, sources
         return response
 
 
