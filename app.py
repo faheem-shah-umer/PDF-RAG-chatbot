@@ -16,6 +16,8 @@ if "selected_model_id" not in st.session_state:
     st.session_state.selected_model_id = None
 if "selected_model_name" not in st.session_state:
     st.session_state.selected_model_name = None
+if "pending_query" not in st.session_state:
+    st.session_state.pending_query = None
 
 st.set_page_config(page_title="LLM Chat with Context", layout="wide")
 st.title("🤖 Chat with your PDF (RAG)")
@@ -45,50 +47,73 @@ if not st.session_state.model_selected:
         st.stop()
 
 # Step 2: Chat Interface
-# Update history rendering loop
+# Update chat_input() logic
+if query := st.chat_input("Ask a question..."):
+    st.session_state.pending_query = query
+    # Show immediately in history (no waiting message)
+    st.session_state.chat_history.append({
+        "question": query,
+        "answer": "",
+        "metrics": "",
+        "sources": ""
+    })
+    st.rerun()
+
+# Show chat history (user + assistant)
 for i, entry in enumerate(st.session_state.chat_history):
     with st.chat_message("user"):
         st.markdown(entry["question"])
-    with st.chat_message("assistant"):
-        st.markdown(entry["answer"])
-        if i == len(st.session_state.chat_history) - 1 and entry.get("metrics"):
-            st.markdown(entry["metrics"], unsafe_allow_html=True)
+    if entry["answer"]:
+        with st.chat_message("assistant"):
+            st.markdown(entry["answer"])
+            if entry.get("metrics"):
+                st.markdown(entry["metrics"], unsafe_allow_html=True)
+            if entry.get("sources"):
+                st.markdown(entry["sources"], unsafe_allow_html=True)
 
-# Update chat_input() logic
-if query := st.chat_input("Ask a question..."):
-    with st.chat_message("user"):
-        st.markdown(query)
+# If there's a pending query, now process it and update the last message
+if st.session_state.pending_query:
+    with st.spinner("Generating answer..."):
+        result = st.session_state.chatbot.ask(st.session_state.pending_query, return_score=True)
 
-    with st.spinner("🤖 Thinking..."):
-        result = st.session_state.chatbot.ask(query, return_score=True)
-
-        if isinstance(result, tuple):
-            if len(result) == 4:
-                answer, avg_score, k, cosine_sim = result
-            else:
-                answer, avg_score, k = result
-                cosine_sim = None
+    if isinstance(result, tuple):
+        if len(result) == 5:
+            answer, avg_score, k, cosine_sim, sources = result
+        elif len(result) == 4:
+            answer, avg_score, k, cosine_sim = result
+            sources = []
         else:
-            answer = result
-            avg_score = k = cosine_sim = None
+            answer, avg_score, k = result
+            cosine_sim = None
+            sources = []
+    else:
+        answer = result
+        avg_score = k = cosine_sim = None
+        sources = []
 
-    # Prepare the score display only for this turn
+    # Format result metrics
+    score_display = ""
     if avg_score is not None and k is not None:
         score_display = f"`Average Vector relevance scores: {avg_score:.4f} (k={k})`"
         if cosine_sim is not None:
             score_display += f" &nbsp; `Answer to Chunk Cosine Similarity: {cosine_sim:.4f}`"
-    else:
-        score_display = ""
 
-    # Append everything for this turn
-    st.session_state.chat_history.append({
-        "question": query,
-        "answer": answer,
-        "metrics": score_display
-    })
+    # Format sources
+    sources_md = ""
+    if sources:
+        sources_md = (
+            "<div style='color: grey; font-size: 0.85em; margin-top: 0.5em;'>"
+            "<b>References used:</b><br>"
+            + "<br>".join([f"{src}" for src in sources]) +
+            "</div>"
+        )
 
-    # Render latest assistant response
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-        if score_display:
-            st.markdown(score_display, unsafe_allow_html=True)
+    # Replace the last message with actual answer
+    st.session_state.chat_history[-1]["answer"] = answer
+    st.session_state.chat_history[-1]["metrics"] = score_display
+    st.session_state.chat_history[-1]["sources"] = sources_md
+
+    # Clear the pending flag
+    st.session_state.pending_query = None
+
+    st.rerun()
