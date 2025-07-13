@@ -2,7 +2,7 @@
 
 import streamlit as st
 import json
-from ask_chatbotLangGraph_openrouter import ChatBot
+from ask_chatbot_openrouter import ChatBot
 
 # Init session state
 # Safe Session State Initialization

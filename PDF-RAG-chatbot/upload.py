@@ -3,7 +3,7 @@ import tempfile
 import os
 import io
 import contextlib
-from pdf2vstore_base64 import process_pdf
+from pdf2vstore import process_pdf
 
 st.set_page_config(page_title="📤 Upload PDF to VStore", layout="centered")
 st.title("📤 Upload PDF and Store in Vector DB")
